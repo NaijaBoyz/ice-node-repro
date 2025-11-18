@@ -2,8 +2,8 @@
 set -euo pipefail
 
 
-USER_NAME="username"
-USER_PASS="password"
+USER_NAME="ooluwagbire3"
+USER_PASS="ChelseaFC123="
 
 M3_BASE_URL="https://physionet.org/files/mimiciii/1.4"
 M3_DEST="./data/mimiciii-1.4"
