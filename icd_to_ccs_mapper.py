@@ -1,9 +1,3 @@
-"""
-ICD to CCS Mapping Module
-Handles mapping of ICD-9-CM and ICD-10-CM codes to CCS categories
-using the 2015 multi-level CCS tools + ICD-10→ICD-9 GEM.
-"""
-
 import csv
 import pandas as pd
 from pathlib import Path
@@ -11,13 +5,7 @@ from typing import List, Optional, Dict, Tuple, Set
 
 
 class ICDtoCCSMapper:
-    """Maps ICD-9-CM and ICD-10-CM codes to CCS (Clinical Classifications Software) categories"""
-
     def __init__(self, data_path: str = "data/mappings"):
-        # data_path should contain:
-        #   Multi_Level_CCS_2015/ccs_multi_dx_tool_2015.csv
-        #   Multi_Level_CCS_2015/dxmlabel-13.csv
-        #   icd10cm_to_icd9cm_gem.csv
         self.data_path = Path(data_path)
 
         self.icd9_to_ccs: Dict[str, Dict[str, str]] = {}
@@ -25,10 +13,7 @@ class ICDtoCCSMapper:
         self.icd10_to_ccs: Dict[str, List[Tuple[str, str]]] = {}
         self.ccs_labels: Dict[str, str] = {}
 
-    # ---------- ICD-9 → CCS from multi-level dx tool ----------
-
     def load_icd9_to_ccs(self, filename: str = "Multi_Level_CCS_2015/ccs_multi_dx_tool_2015.csv"):
-        """Load ICD-9-CM to CCS mapping from multi-level diagnosis tool"""
         filepath = self.data_path / filename
         print(f"Loading ICD-9-CM to CCS mappings from {filepath}")
 
@@ -36,7 +21,7 @@ class ICDtoCCSMapper:
 
         with filepath.open("r", encoding="utf-8") as f:
             reader = csv.reader(f, quotechar="'")
-            header = next(reader)  # skip header
+            header = next(reader)
 
             count = 0
             for row in reader:
@@ -68,7 +53,6 @@ class ICDtoCCSMapper:
                     "level_4_label": ccs_lvl4_label,
                 }
 
-                # Track codes per level
                 if ccs_lvl1:
                     codes_by_level[1].add(ccs_lvl1)
                     self.ccs_labels.setdefault(ccs_lvl1, ccs_lvl1_label)
@@ -92,10 +76,7 @@ class ICDtoCCSMapper:
 
         return self.icd9_to_ccs
 
-    # ---------- ICD-10 → ICD-9 GEM ----------
-
     def load_icd10_to_icd9_gem(self, filename: str = "icd10cm_to_icd9cm_gem.csv"):
-        """Load ICD-10-CM → ICD-9-CM GEM (General Equivalence Mappings)"""
         filepath = self.data_path / filename
         print(f"Loading ICD-10-CM to ICD-9-CM GEM from {filepath}")
 
@@ -116,10 +97,7 @@ class ICDtoCCSMapper:
         print(f"Unique ICD-10 codes in GEM: {len(self.icd10_to_icd9)}")
         return self.icd10_to_icd9
 
-    # ---------- ICD-10 → CCS via ICD-9 ----------
-
     def build_icd10_to_ccs(self):
-        """Build ICD-10-CM → CCS mapping using ICD-9 multi-level CCS"""
         print("Building ICD-10-CM to CCS mappings...")
 
         count = 0
@@ -151,10 +129,7 @@ class ICDtoCCSMapper:
         print(f"Built {count} ICD-10-CM to CCS mappings ({unmapped} ICD-10 codes unmapped)")
         return self.icd10_to_ccs
 
-    # ---------- Optional: load full CCS labels from dxmlabel ----------
-
     def load_ccs_labels_from_dxmlabel(self, filename: str = "Multi_Level_CCS_2015/dxmlabel-13.csv"):
-        """Load full list of multi-level CCS diagnosis categories / labels"""
         filepath = self.data_path / filename
         if not filepath.exists():
             print(f"{filepath} not found, skipping extra CCS label load")
@@ -163,14 +138,13 @@ class ICDtoCCSMapper:
         print(f"Loading CCS category labels from {filepath}")
         with filepath.open("r", encoding="utf-8") as f:
             reader = csv.reader(f, quotechar="'")
-            header = next(reader)  # first row is header
+            header = next(reader)
             for row in reader:
                 if not row:
                     continue
                 code = row[0].strip().strip("'").strip()
                 if not code:
                     continue
-                # label is second column
                 if len(row) > 1:
                     label = row[1].strip().strip('"').strip()
                 else:
@@ -180,27 +154,12 @@ class ICDtoCCSMapper:
 
         print(f"Total CCS categories with labels in mapper: {len(self.ccs_labels)}")
 
-    # ---------- Main mapping method used in ETL ----------
-
     def map_code(self, code: str, code_type: str = "auto", level: Optional[int] = None) -> List[str]:
-        """
-        Map an ICD code to CCS categories.
-
-        Args:
-            code: ICD code to map (ICD-9-CM or ICD-10-CM)
-            code_type: 'ICD9', 'ICD10', or 'auto' (auto-detect)
-            level: CCS level (1, 2, 3, or 4) or None for all levels
-
-        Returns:
-            List of CCS codes (strings like '1', '1.1', '1.1.1', '1.1.2.1', ...)
-        """
         code = str(code).strip().upper()
         if not code:
             return []
 
-        # Auto-detect ICD type
         if code_type == "auto":
-            # ICD-10 codes usually start with a letter
             if code[0].isalpha():
                 code_type = "ICD10"
             else:
@@ -216,11 +175,14 @@ class ICDtoCCSMapper:
                 return []
 
             if level is None:
+                last_ccs = None
                 for lvl in [1, 2, 3, 4]:
                     key = f"level_{lvl}"
                     val = mapping.get(key)
                     if val and val.strip() and val != " ":
-                        ccs_codes.append(val)
+                        last_ccs = val  # Keep overwriting with deeper levels
+                if last_ccs:
+                    ccs_codes.append(last_ccs)
             else:
                 key = f"level_{level}"
                 val = mapping.get(key)
@@ -232,32 +194,36 @@ class ICDtoCCSMapper:
             if not mappings:
                 return []
 
-            for lvl_str, ccs_code in mappings:
-                if not ccs_code or ccs_code == " ":
-                    continue
-                if level is None:
-                    ccs_codes.append(ccs_code)
-                else:
+            if level is None:
+                deepest_level = 0
+                deepest_code = None
+                for lvl_str, ccs_code in mappings:
+                    if not ccs_code or ccs_code == " ":
+                        continue
+                    lvl_num = int(lvl_str.split("_")[1])
+                    if lvl_num > deepest_level:
+                        deepest_level = lvl_num
+                        deepest_code = ccs_code
+                if deepest_code:
+                    ccs_codes.append(deepest_code)
+            else:
+                for lvl_str, ccs_code in mappings:
+                    if not ccs_code or ccs_code == " ":
+                        continue
                     lvl_num = int(lvl_str.split("_")[1])
                     if lvl_num == level:
                         ccs_codes.append(ccs_code)
 
         return ccs_codes
 
-    # ---------- Convenience init ----------
-
     def initialize(self):
-        """Initialize all mappings and labels"""
         self.load_icd9_to_ccs()
         self.load_icd10_to_icd9_gem()
         self.build_icd10_to_ccs()
-        # Optional: bring in full label list (includes categories with no ICD codes)
         self.load_ccs_labels_from_dxmlabel()
         print("ICD→CCS mapper initialization complete!")
         return self
 
-
-# Simple quick test when you run this file directly
 if __name__ == "__main__":
     mapper = ICDtoCCSMapper()
     mapper.initialize()
