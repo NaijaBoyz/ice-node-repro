@@ -1,0 +1,56 @@
+MIMIC-III dataset loaded: 46520 patients
+MIMIC-IV dataset loaded: 223452 patients
+
+Initializing ICD to CCS mapper...
+Loading ICD-9-CM to CCS mappings from data/mappings/Multi_Level_CCS_2015/ccs_multi_dx_tool_2015.csv
+Loaded 15072 ICD-9-CM to CCS mappings
+  Distinct CCS codes at level 1: 18
+  Distinct CCS codes at level 2: 135
+  Distinct CCS codes at level 3: 366
+  Distinct CCS codes at level 4: 208
+Unique CCS codes across levels 1–4 from ICD-9: 727
+Loading ICD-10-CM to ICD-9-CM GEM from data/mappings/icd10cm_to_icd9cm_gem.csv
+Loaded 78838 ICD-10-CM to ICD-9-CM GEM rows
+Unique ICD-10 codes in GEM: 69832
+Building ICD-10-CM to CCS mappings...
+Built 69163 ICD-10-CM to CCS mappings (669 ICD-10 codes unmapped)
+Loading CCS category labels from data/mappings/Multi_Level_CCS_2015/dxmlabel-13.csv
+Total CCS categories with labels in mapper: 729
+ICD→CCS mapper initialization complete!
+
+MIMIC-III filtered patient count: 4300
+MIMIC-IV filtered patient count: 81879
+
+Mapping MIMIC-III visits to CCS codes...
+  Total visits: 10589
+  Visits with CCS codes: 10500
+  Mapping success rate (per-visit): 99.2%
+
+Mapping MIMIC-IV visits to CCS codes...
+  Total visits: 300904
+  Visits with CCS codes: 300168
+  Mapping success rate (per-visit): 99.8%
+
+CCS categories in vocabulary (multi-level): 581
+
+Sample CCS codes and labels:
+  1.1.1: Tuberculosis [1.]
+  1.1.2.1: Streptococcal septicemia
+  1.1.2.2: Staphylococcal septicemia
+  1.1.2.3: E. Coli septicemia
+  1.1.2.4: Other gram negative septicemia
+  1.1.2.5: Other specified septicemia
+  1.1.2.6: Unspecified septicemia
+  1.1.3: Sexually transmitted infections (not HIV or hepatitis) [9.]
+  1.1.4: Other bacterial infections [3.]
+  1.2.1: Candidiasis of the mouth (thrush)
+
+MIMIC-III patients with valid timeseries: 4216
+MIMIC-IV patients with valid timeseries: 81634
+
+Processed data saved to data/processed
+
+MIMIC-III train/val/test split: 2951/632/633
+MIMIC-IV train/val/test split: 57143/12245/12246
+
+Data preparation complete!
