@@ -34,7 +34,7 @@ You need access to the MIMIC-III data (following the PhysioNet license).
 2. Run the preprocessing script to build patient time series and splits:
 
 ```bash
-python etl.py --dataset mimic3
+uv run etl.py --dataset mimic3
 ```
 
 This will create processed pickles under `data/processed/`.
@@ -42,7 +42,7 @@ This will create processed pickles under `data/processed/`.
 3. Build final training examples (per split) from the time series:
 
 ```bash
-python build_examples.py --dataset mimic3
+uv run build_examples.py --dataset mimic3
 ```
 
 
@@ -53,7 +53,7 @@ The main training script is `train3.py`. Example commands:
 **ICE-NODE (ICENodeAugmented) with focal loss**
 
 ```bash
-python train3.py \
+uv run train3.py \
   --model ICENodeAugmented \
   --dataset mimic3 \
   --epochs 60 \
@@ -67,7 +67,7 @@ python train3.py \
 **GRU baseline**
 
 ```bash
-python train3.py \
+uv run train3.py \
   --model GRUBaseline \
   --dataset mimic3 \
   --epochs 30 \
@@ -87,7 +87,7 @@ Use `eval.py` to compute the same metrics as in
 `ICE-NODE/notebooks/dx_fine_analysis.ipynb`:
 
 ```bash
-python eval.py \
+uv run eval.py \
   --model-path checkpoints/mimic3_ICENodeAugmented_best.pt \
   --dataset mimic3
 ```
