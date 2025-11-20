@@ -7,5 +7,6 @@ requires-python = ">=3.11"
 dependencies = [
     "numpy==1.26.4",
     "pyhealth==1.1.4",
+    "seaborn>=0.13.2",
     "torchdiffeq>=0.2.5",
 ]

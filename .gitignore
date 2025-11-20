@@ -1,1 +1,6 @@
-data/
+/ICE-NODE
+/checkpoints
+/.venv
+/__pycache__
+/data
+/eval_results
