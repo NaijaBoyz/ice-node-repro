@@ -19,7 +19,16 @@ class ModelEvaluator:
     def __init__(self, model_path: str, dataset: str = "mimic3", device: str = "auto"):
         self.model_path = model_path
         self.dataset = dataset
-        self.device = torch.device("cuda" if torch.cuda.is_available() and device == "auto" else "cpu")
+
+        if device == "auto":
+            if torch.cuda.is_available():
+                self.device = torch.device("cuda")
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                self.device = torch.device("mps")
+            else:
+                self.device = torch.device("cpu")
+        else:
+            self.device = torch.device(device)
         self.model: nn.Module | None = None
         self.test_loader: DataLoader | None = None
         self.quantile_masks = None
@@ -42,9 +51,8 @@ class ModelEvaluator:
         print(f"   Model: {model_name}")
         print(f"   Vocab size: {self.vocab_size}")
         model_class = MODEL_REGISTRY[model_name]
-        if model_name == "GRUBaseline":
-            config = {"vocab_size": self.vocab_size}
-        elif model_name in ("ICENode", "ICENodeAugmented"):
+
+        if model_name in ("ICENode", "ICENodeAugmented", "ICENodeUniform"):
             model_config = checkpoint.get("model_config", {})
             config = {
                 "vocab_size": self.vocab_size,
@@ -55,6 +63,8 @@ class ModelEvaluator:
                 "reg_order": 1,
             }
             config.update(model_config)
+        elif model_name in ("GRUBaseline", "RETAINBaseline", "LogRegBaseline"):
+            config = {"vocab_size": self.vocab_size}
         else:
             raise ValueError(f"Unknown model type in checkpoint: {model_name}")
         print(f"   Config: {config}")

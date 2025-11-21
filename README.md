@@ -97,6 +97,40 @@ ACC-Pi-kK detectability metrics stratified by code frequency
 quantiles, and writes results to `eval_results/`.
 
 
+### 5. High-level training and evaluation scripts
+
+For convenience, the repository also includes shell scripts that run
+the full set of models and evaluations.
+
+- `train_mimic3.sh` trains all six models on MIMIC-III:
+  - ICE-NODE (ICENodeAugmented)
+  - ICE-NODE UNIFORM (ICENodeUniform)
+  - GRU baseline (GRUBaseline)
+  - RETAIN baseline (RETAINBaseline)
+  - LogReg baseline (LogRegBaseline)
+  - ICENode (simpler, no demographics)
+
+- `train_mimic4.sh` trains the same six models on MIMIC-IV, using the
+  same checkpoint subdirectories.
+
+- `eval_mm3Models_mimc3_and_4.sh` evaluates all six models on both
+  MIMIC-III and MIMIC-IV (where the corresponding checkpoints exist),
+  calling `eval.py` under the hood and writing reports to
+  `eval_results/`.
+
+- `run_all_mm3_mm4.sh` orchestrates the full pipeline:
+  1. `train_mimic3.sh`
+  2. `train_mimic4.sh`
+  3. `eval_mm3Models_mimc3_and_4.sh`
+
+Example usage:
+
+```bash
+chmod +x train_mimic3.sh train_mimic4.sh eval_mm3Models_mimc3_and_4.sh run_all_mm3_mm4.sh
+./run_all_mm3_mm4.sh
+```
+
+
 Citation
 --------
 

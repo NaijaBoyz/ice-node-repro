@@ -1,0 +1,40 @@
+\begin{table}[ht]
+\centering
+\caption{Test Set Coverage and Statistical Power by Code Frequency}
+\label{tab:mimic3_coverage}
+\begin{tabular}{cccccc}
+\toprule
+Quantile & Codes & Coverage & \multicolumn{3}{c}{Test Occurrences} \\
+         &       & (\%)     & Median & Mean & Total \\
+\midrule
+Q0 (0--20\%) & 308 & 89.9 & 8 & 11.4 & 3149 $\sim$ \\
+Q1 (20--40\%) & 59 & 100.0 & 51 & 51.8 & 3056 $\checkmark$ \\
+Q2 (40--60\%) & 30 & 100.0 & 103 & 103.7 & 3110 $\checkmark$ \\
+Q3 (60--80\%) & 15 & 100.0 & 209 & 222.6 & 3339 $\checkmark$ \\
+Q4 (80--100\%) & 7 & 100.0 & 450 & 457.4 & 3202 $\checkmark$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\caption{Comparison: MIMIC-III vs MIMIC-IV Test Set Adequacy}
+\label{tab:dataset_comparison}
+\begin{tabular}{lcc}
+\toprule
+Metric & MIMIC-III & MIMIC-IV \\
+\midrule
+Test Patients & 633 & 12,246 \\
+Vocabulary Size & 581 & 581 \\
+Code Coverage & 406/581 (69.9\%) & $>$570/581 ($>$98\%) \\
+\midrule
+Q0 (0--20\%) Median & 8 $\times$ & $\sim$155 $\checkmark$ \\
+Q1 (20--40\%) Median & 51 $\checkmark$ & $\sim$989 $\checkmark$ \\
+Q2 (40--60\%) Median & 103 $\checkmark$ & $\sim$1998 $\checkmark$ \\
+Q3 (60--80\%) Median & 209 $\checkmark$ & $\sim$4055 $\checkmark$ \\
+Q4 (80--100\%) Median & 450 $\checkmark$ & $\sim$8730 $\checkmark$ \\
+\midrule
+Adequate Quantiles & 4/5 & 5/5 (est.) \\
+\bottomrule
+\end{tabular}
+\end{table}
