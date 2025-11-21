@@ -191,6 +191,10 @@ class ModelEvaluator:
         print(f"   MICRO-AUPRC:   {metrics['micro_auprc']:.6f}")
         print(f"   MACRO-AUC:     {metrics['macro_auroc']:.6f}")
         print(f"   MACRO-AUPRC:   {metrics['macro_auprc']:.6f}")
+        if "visit_micro_auroc" in metrics:
+            print(f"   VISIT MICRO-AUC: {metrics['visit_micro_auroc']:.6f}")
+        if "visit_macro_auroc" in metrics:
+            print(f"   VISIT MACRO-AUC: {metrics['visit_macro_auroc']:.6f}")
         print("\nHITS@K PERFORMANCE:")
         for k in [1, 2, 3, 5, 7, 10, 15, 20]:
             key = f"hits@{k}"
@@ -242,6 +246,10 @@ class ModelEvaluator:
             f.write(f"Dataset: {self.dataset}\n")
             f.write(f"MICRO-AUC: {metrics['micro_auroc']:.6f}\n")
             f.write(f"MACRO-AUC: {metrics['macro_auroc']:.6f}\n")
+            if "visit_micro_auroc" in metrics:
+                f.write(f"VISIT MICRO-AUC: {metrics['visit_micro_auroc']:.6f}\n")
+            if "visit_macro_auroc" in metrics:
+                f.write(f"VISIT MACRO-AUC: {metrics['visit_macro_auroc']:.6f}\n")
             f.write(f"Total Patients: {metrics['total_patients']}\n")
             f.write(f"Total Timesteps: {metrics['total_timesteps']}\n\n")
             f.write("Detectability Results:\n")

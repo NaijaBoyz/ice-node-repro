@@ -3,19 +3,18 @@
 set -e  # Exit on error
 
 echo "============================================================================"
-echo "ICE-NODE Paper: Training All 6 Models"
+echo "ICE-NODE Paper: Training All 6 Models (paper-mode)"
 echo "============================================================================"
 echo ""
-echo "This will train:"
-echo "  1. ICE-NODE (main model - best on rare codes)"
+echo "This will train (paper-style loss/selection):"
+echo "  1. ICE-NODE "
 echo "  2. ICE-NODE UNIFORM (ablation - fixed time intervals)"
 echo "  3. GRU Baseline (sequential only)"
 echo "  4. RETAIN Baseline (reverse attention)"
 echo "  5. LogReg Baseline (no temporal info)"
 echo "  6. ICENode (simpler, no demographics)"
 echo ""
-echo "Dataset: MIMIC-III (4,385 patients, 581 CCS codes)"
-echo "Estimated time: ~6-12 hours total on CPU, ~2-4 hours on GPU"
+echo "Dataset: MIMIC-III (CCS labels)"
 echo ""
 echo "Starting training..."
 echo ""
@@ -29,11 +28,14 @@ uv run train3.py \
     --batch-size 256 \
     --lr-dynamics 7.15e-5 \
     --lr-other 1.14e-3 \
+    --weight-decay 1e-5 \
     --decay-rate 0.3 \
     --patience 5 \
     --reg-alpha 1000.0 \
     --reg-order 3 \
     --seed 42 \
+    --paper-mode \
+    --no-focal-loss \
     --save-dir checkpoints/icenode_full
 
 echo "ICE-NODE trained!"
@@ -49,11 +51,14 @@ uv run train3.py \
     --batch-size 256 \
     --lr-dynamics 7.15e-5 \
     --lr-other 1.14e-3 \
+    --weight-decay 1e-5 \
     --decay-rate 0.3 \
     --patience 5 \
     --reg-alpha 1000.0 \
     --reg-order 3 \
     --seed 42 \
+    --paper-mode \
+    --no-focal-loss \
     --save-dir checkpoints/icenode_uniform
 
 echo "ICE-NODE UNIFORM trained!"
@@ -72,6 +77,9 @@ uv run train3.py \
     --decay-rate 0.3 \
     --patience 5 \
     --seed 42 \
+    --paper-mode \
+    --no-regularization \
+    --no-focal-loss \
     --save-dir checkpoints/gru
 
 echo "GRU Baseline trained!"
@@ -86,9 +94,13 @@ uv run train3.py \
     --epochs 60 \
     --batch-size 256 \
     --lr-other 1.14e-3 \
+    --weight-decay 1e-5 \
     --decay-rate 0.3 \
     --patience 5 \
     --seed 42 \
+    --paper-mode \
+    --no-regularization \
+    --no-focal-loss \
     --save-dir checkpoints/retain
 
 echo "RETAIN Baseline trained!"
@@ -104,9 +116,13 @@ uv run train3.py \
     --epochs 30 \
     --batch-size 256 \
     --lr-other 1e-3 \
+    --weight-decay 1e-5 \
     --decay-rate 0.5 \
     --patience 10 \
     --seed 42 \
+    --paper-mode \
+    --no-regularization \
+    --no-focal-loss \
     --save-dir checkpoints/logreg
 
 echo "LogReg Baseline trained!"
@@ -123,11 +139,14 @@ uv run train3.py \
     --batch-size 256 \
     --lr-dynamics 7.15e-5 \
     --lr-other 1.14e-3 \
+    --weight-decay 1e-5 \
     --decay-rate 0.3 \
     --patience 5 \
     --reg-alpha 1000.0 \
     --reg-order 3 \
     --seed 42 \
+    --paper-mode \
+    --no-focal-loss \
     --save-dir checkpoints/icenode_simple
 
 echo "ICENode (simple) trained!"
