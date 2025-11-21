@@ -349,6 +349,41 @@ def compute_metrics_flat(
             print("  No lengths provided, using original tensors")
 
         N_adm = probs_adm.shape[0]
+
+        y_true_adm_flat = y_true_adm.ravel()
+        y_score_adm_flat = probs_adm.ravel()
+
+        if np.any(y_true_adm_flat > 0):
+            visit_micro_auroc = roc_auc_score(y_true_adm_flat, y_score_adm_flat)
+            visit_micro_auprc = average_precision_score(y_true_adm_flat, y_score_adm_flat)
+        else:
+            visit_micro_auroc = 0.0
+            visit_micro_auprc = 0.0
+
+        visit_aurocs = []
+        visit_auprcs = []
+        for j in range(V):
+            yj = y_true_adm[:, j]
+            sj = probs_adm[:, j]
+            if np.any(yj > 0):
+                try:
+                    visit_aurocs.append(roc_auc_score(yj, sj))
+                    visit_auprcs.append(average_precision_score(yj, sj))
+                except ValueError:
+                    continue
+
+        if visit_aurocs:
+            visit_macro_auroc = float(np.mean(visit_aurocs))
+            visit_macro_auprc = float(np.mean(visit_auprcs))
+        else:
+            visit_macro_auroc = 0.0
+            visit_macro_auprc = 0.0
+
+        metrics["visit_micro_auroc"] = float(visit_micro_auroc)
+        metrics["visit_micro_auprc"] = float(visit_micro_auprc)
+        metrics["visit_macro_auroc"] = float(visit_macro_auroc)
+        metrics["visit_macro_auprc"] = float(visit_macro_auprc)
+
         top15_idx = np.argpartition(-probs_adm, kth=min(15, V-1), axis=1)[:, :15]
         print(f"  Computing top-15 predictions for {N_adm} admissions")
 
@@ -431,6 +466,11 @@ def print_metrics(prefix: str, metrics: dict):
     print(f"  {prefix} macro AUROC: {metrics['macro_auroc']:.4f}")
     print(f"  {prefix} macro AUPRC: {metrics['macro_auprc']:.4f}")
 
+    if "visit_micro_auroc" in metrics:
+        print(f"  {prefix} visit micro AUROC: {metrics['visit_micro_auroc']:.4f}")
+    if "visit_macro_auroc" in metrics:
+        print(f"  {prefix} visit macro AUROC: {metrics['visit_macro_auroc']:.4f}")
+
     for k in sorted([k for k in metrics if k.startswith("hits@")]):
         if not k.endswith("_q0") and not k.endswith("_q1") and not k.endswith("_q2")\
            and not k.endswith("_q3") and not k.endswith("_q4"):
@@ -502,7 +542,8 @@ def run_epoch(
     quantile_masks=None,
     class_weights=None,
     use_class_weights=False,
-    use_focal_loss=True
+    use_focal_loss=True,
+    paper_mode=False,
 ):
 
     model.train(train)
@@ -552,15 +593,18 @@ def run_epoch(
             compute_regularization=use_regularization,
         )
 
-        if use_focal_loss:
-
-            bce_loss = compute_balanced_focal_bce(logits, targets, gamma=2.0, beta=0.999)
-        elif use_class_weights and class_weights is not None:
-
-            bce_loss = compute_loss_bce(logits, targets, class_weights, device, use_focal=False)
+       
+        if paper_mode:
+           
+            bce_loss = F.binary_cross_entropy_with_logits(logits, targets, reduction='mean')
         else:
-
-            bce_loss = compute_loss_bce(logits, targets, device=device, use_focal=False)
+            
+            if use_focal_loss:
+                bce_loss = compute_balanced_focal_bce(logits, targets, gamma=2.0, beta=0.999)
+            elif use_class_weights and class_weights is not None:
+                bce_loss = compute_loss_bce(logits, targets, class_weights, device, use_focal=False)
+            else:
+                bce_loss = compute_loss_bce(logits, targets, device=device, use_focal=False)
 
         if use_regularization and reg_loss_batch is not None:
             reg_loss = reg_alpha * reg_loss_batch
@@ -591,7 +635,12 @@ def run_epoch(
         empty_logits = torch.empty(0, 0)
         empty_targets = torch.empty(0, 0)
         empty_lengths = torch.empty(0)
-        metrics = compute_metrics_flat(empty_logits, empty_targets, empty_lengths, quantile_masks)
+        metrics = compute_metrics_flat(
+            empty_logits,
+            empty_targets,
+            empty_lengths,
+            quantile_masks=quantile_masks,
+        )
     else:
 
         all_logits_cat = torch.cat([l.reshape(-1, l.shape[-1]) for l in all_logits], dim=0)
@@ -654,6 +703,11 @@ def main():
                         help='LR decay factor for ReduceLROnPlateau schedulers')
     parser.add_argument('--patience', type=int, default=5,
                         help='LR scheduler patience (epochs)')
+    parser.add_argument(
+        '--paper-mode',
+        action='store_true',
+        help='Use loss/selection settings that mimic the ICE-NODE paper (plain BCE, no recall penalty/class weights/focal; early stopping on visit_micro_auprc if available)',
+    )
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -689,7 +743,12 @@ def main():
     print(f"Training samples: {len(train_dataset)}")
     print(f"Validation samples: {len(val_dataset)}")
 
-    quantile_masks, _, class_weights = compute_code_frequency_quantiles(train_dataset, vocab_size, min_occurrences=3)
+    quantile_masks, _, class_weights = compute_code_frequency_quantiles(
+        train_dataset,
+        vocab_size,
+        min_occurrences=3,
+    )
+    class_weights = class_weights.to(device)
     print()
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_full)
@@ -733,7 +792,8 @@ def main():
             quantile_masks=quantile_masks,
             class_weights=class_weights if args.use_class_weights else None,
             use_class_weights=args.use_class_weights,
-            use_focal_loss=args.use_focal_loss
+            use_focal_loss=args.use_focal_loss,
+            paper_mode=args.paper_mode,
         )
 
         print(f"Train Loss: {train_loss:.4f} (BCE: {train_metrics['bce_loss']:.4f}, Reg: {train_metrics['reg_loss']:.4f})")
@@ -746,7 +806,8 @@ def main():
                 quantile_masks=quantile_masks,
                 class_weights=class_weights if args.use_class_weights else None,
                 use_class_weights=args.use_class_weights,
-                use_focal_loss=args.use_focal_loss
+                use_focal_loss=args.use_focal_loss,
+                paper_mode=args.paper_mode,
             )
 
         print(f"\nVal Loss: {val_loss:.4f} (BCE: {val_metrics['bce_loss']:.4f})")
@@ -754,13 +815,19 @@ def main():
         train_losses.append(train_loss)
         val_losses.append(val_loss)
 
-        val_auroc = val_metrics["micro_auroc"]
+        # ---- Selection / scheduler metric ----
+        if args.paper_mode and "visit_micro_auprc" in val_metrics:
+            selection_metric = val_metrics["visit_micro_auprc"]
+        elif "visit_micro_auroc" in val_metrics:
+            selection_metric = val_metrics["visit_micro_auroc"]
+        else:
+            selection_metric = val_metrics["micro_auroc"]
 
         for scheduler in schedulers:
-            scheduler.step(val_auroc)
+            scheduler.step(selection_metric)
 
-        if val_auroc > best_val_auroc:
-            best_val_auroc = val_auroc
+        if selection_metric > best_val_auroc:
+            best_val_auroc = selection_metric
             torch.save({
                 "model_state_dict": model.state_dict(),
                 "epoch": epoch,
@@ -768,11 +835,12 @@ def main():
                 "vocab_size": vocab_size,
                 "args": vars(args),
             }, ckpt_path)
-            print(f"Saved best model (MICRO-AUC={best_val_auroc:.4f})")
+            print(f"Saved best model (VAL metric={best_val_auroc:.4f})")
 
     print(f"\n{'='*70}")
-    print(f"Training completed! Best validation MICRO-AUC: {best_val_auroc:.4f}")
+    print(f"Training completed! Best validation AUC (selection metric): {best_val_auroc:.4f}")
     print(f"{'='*70}")
+
     if train_losses and val_losses:
         plt.figure()
         plt.plot(range(1, len(train_losses) + 1), train_losses, label="train")
