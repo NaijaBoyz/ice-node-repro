@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score, average_precision_score
 import matplotlib.pyplot as plt
-from dataset2 import MIMICFullTrajectoryDataset, collate_full
+from dataset import MIMICFullTrajectoryDataset, collate_full
 from model3 import MODEL_REGISTRY
 
 def set_seed(seed: int = 0):
@@ -20,23 +20,21 @@ def set_seed(seed: int = 0):
     torch.cuda.manual_seed_all(seed)
 
 def compute_code_frequency_quantiles(train_dataset, vocab_size=581, min_occurrences=3):
-
+    
     code_frequencies = torch.zeros(vocab_size)
 
     for i in range(len(train_dataset)):
         sample = train_dataset[i]
 
         if len(sample) == 4:
-
             times_tensor, codes_tensor, length, _ = sample
         else:
-
             times_tensor, codes_tensor, demographic_features, length, _ = sample
 
         length_val = int(length.item()) if torch.is_tensor(length) else int(length)
 
         for t in range(length_val):
-            code_vector = codes_tensor[t]
+            code_vector = codes_tensor[t]     
             code_indices = torch.where(code_vector > 0)[0]
             for code in code_indices:
                 code_frequencies[code] += 1
@@ -47,43 +45,67 @@ def compute_code_frequency_quantiles(train_dataset, vocab_size=581, min_occurren
 
     print(f"\nCode frequency statistics:")
     print(f"  Total codes in vocabulary: {vocab_size}")
-    print(f"  Codes with at least one occurrence: {(code_frequencies > 0).sum().item()} ({(code_frequencies > 0).sum().item()/vocab_size*100:.1f}%)")
-    print(f"  Codes excluded (<{min_occurrences} occurrences): {(~included_mask).sum().item()}")
-    print(f"  Codes included in quintiles: {n_included}")
+    print(f"  Codes with at least one occurrence: "
+          f"{(code_frequencies > 0).sum().item()} "
+          f"({(code_frequencies > 0).sum().item()/vocab_size*100:.1f}%)")
+    print(f"  Codes excluded (<{min_occurrences} occurrences): "
+          f"{(~included_mask).sum().item()}")
+    print(f"  Codes eligible for quintiles (>= {min_occurrences}): {n_included}")
     print(f"  Max occurrences for any code: {code_frequencies.max().item()}")
 
-    included_freqs = code_frequencies[included_indices]
-    sorted_idx = torch.argsort(included_freqs)
-    sorted_included_indices = included_indices[sorted_idx]
+    quantile_masks = {f"Q{q}": torch.zeros(vocab_size, dtype=torch.bool)
+                      for q in range(5)}
 
-    quantile_size = n_included // 5
-    quantile_masks = {}
+    if n_included > 0:
+        included_freqs = code_frequencies[included_indices]
+        sort_idx = torch.argsort(included_freqs)
+        sort_idx = torch.argsort(included_freqs)  # ascending
+        sorted_included_indices = included_indices[sort_idx]
+        sorted_freqs = included_freqs[sort_idx]
 
-    for q in range(5):
-        mask = torch.zeros(vocab_size, dtype=torch.bool)
+        total_freq = sorted_freqs.sum().item()
+        if total_freq == 0:
+            total_freq = 1.0  # avoid div by zero
 
-        if q < 4:
-            start = q * quantile_size
-            end = (q + 1) * quantile_size
-        else:
+        boundaries = [0.2, 0.4, 0.6, 0.8, 1.0]
+        cum_freq = 0.0
+        current_q = 0
 
-            start = 4 * quantile_size
-            end = n_included
+        for code, freq in zip(sorted_included_indices.tolist(),
+                              sorted_freqs.tolist()):
+            cum_freq += freq
+            frac = cum_freq / total_freq
+            while current_q < 4 and frac > boundaries[current_q]:
+                current_q += 1
 
-        mask[sorted_included_indices[start:end]] = True
-        quantile_masks[f'Q{q}'] = mask
+            quantile_masks[f"Q{current_q}"][code] = True
 
-        q_codes = sorted_included_indices[start:end]
-        q_freqs = code_frequencies[q_codes]
-        print(f"  Quantile {q} ({q*20}-{(q+1)*20}%): {len(q_codes)} codes, freq range: {q_freqs.min().item()}-{q_freqs.max().item()}, avg: {q_freqs.mean().item():.1f}")
+        for q in range(5):
+            mask = quantile_masks[f"Q{q}"]
+            q_codes = torch.where(mask)[0]
+            if len(q_codes) > 0:
+                q_freqs = code_frequencies[q_codes]
+                frac_low = 0.0 if q == 0 else boundaries[q-1]
+                frac_high = boundaries[q]
+                print(
+                    f"  Quantile Q{q} "
+                    f"({int(frac_low*100)}-{int(frac_high*100)}% label mass): "
+                    f"{len(q_codes)} codes, "
+                    f"freq range: {q_freqs.min().item()}-{q_freqs.max().item()}, "
+                    f"avg: {q_freqs.mean().item():.1f}"
+                )
+            else:
+                print(
+                    f"  Quantile Q{q}: 0 codes (no label mass assigned here)"
+                )
+    else:
+        print("  Warning: No codes met min_occurrences; quintile masks will be empty.")
 
-    quantile_masks['Excluded'] = ~included_mask
+    quantile_masks["Excluded"] = ~included_mask
 
     class_weights = torch.ones(vocab_size)
     for i in range(vocab_size):
-
         freq = max(1.0, code_frequencies[i].item())
-
         class_weights[i] = 1.0 / (freq ** 0.5)
 
     class_weights = class_weights / class_weights.mean()
@@ -94,6 +116,7 @@ def compute_code_frequency_quantiles(train_dataset, vocab_size=581, min_occurren
     print(f"  Mean weight: {class_weights.mean().item():.4f}")
 
     return quantile_masks, code_frequencies, class_weights
+
 
 def compute_loss_bce(logits, target, class_weights=None, device='cpu', use_focal=False, min_recall=0.05):
 
@@ -560,7 +583,9 @@ def run_epoch(
 
         all_logits.append(logits.detach().cpu())
         all_targets.append(targets.detach().cpu())
-        all_lengths.append(lengths.detach().cpu())
+        effective_lengths = lengths - 1
+        effective_lengths = torch.clamp(effective_lengths, min=0)
+        all_lengths.append(effective_lengths.detach().cpu())
 
     if not all_logits:
         empty_logits = torch.empty(0, 0)
