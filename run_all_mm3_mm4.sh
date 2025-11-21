@@ -12,8 +12,6 @@ echo "  3) Evaluate all models on both MIMIC-III and MIMIC-IV (eval_mm3Models_mi
 echo "============================================================================"
 echo ""
 
-read -p "Press Enter to start the full pipeline..."
-
 echo "[1/3] Training all models on MIMIC-III..."
 bash train_mimic3.sh
 
