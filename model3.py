@@ -507,8 +507,279 @@ class RETAINBaseline(nn.Module):
         return logits, None, None
 
 
+class ICENode(ICENodeAugmented):
+
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int = 300,
+        memory_dim: int = 30,
+        ode_method: str = "dopri5",
+        rtol: float = 1e-3,
+        atol: float = 1e-4,
+        max_dt: float = 365.0,
+        reg_order: int = 1,
+        timescale: float = 7.0,
+    ):
+        super().__init__(
+            vocab_size=vocab_size,
+            embedding_dim=embedding_dim,
+            memory_dim=memory_dim,
+            ode_method=ode_method,
+            rtol=rtol,
+            atol=atol,
+            max_dt=max_dt,
+            reg_order=reg_order,
+            demographic_dim=0,
+            timescale=timescale,
+        )
+        print(f"ICE-NODE (non-augmented) initialized: no demographics")
+
+
+class ICENodeUniform(ICENodeAugmented):
+
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int = 300,
+        memory_dim: int = 30,
+        ode_method: str = "dopri5",
+        rtol: float = 1e-3,
+        atol: float = 1e-4,
+        max_dt: float = 365.0,
+        reg_order: int = 1,
+        demographic_dim: int = 3,
+        timescale: float = 7.0,
+        uniform_dt: float = 7.0,
+    ):
+        super().__init__(
+            vocab_size=vocab_size,
+            embedding_dim=embedding_dim,
+            memory_dim=memory_dim,
+            ode_method=ode_method,
+            rtol=rtol,
+            atol=atol,
+            max_dt=max_dt,
+            reg_order=reg_order,
+            demographic_dim=demographic_dim,
+            timescale=timescale,
+        )
+        self.uniform_dt = uniform_dt
+        print(f"ICE-NODE UNIFORM initialized: fixed dt={uniform_dt} days")
+    
+    def forward(
+        self,
+        times: torch.Tensor,
+        codes: torch.Tensor,
+        lengths: torch.Tensor,
+        demographic_features: Optional[torch.Tensor] = None,
+        return_trajectory: bool = False,
+        compute_regularization: bool = False,
+    ) -> Tuple[torch.Tensor, Optional[List[torch.Tensor]], Optional[torch.Tensor]]:
+        batch_size = codes.size(0)
+        max_len = codes.size(1)
+        device = codes.device
+
+        all_predictions: List[torch.Tensor] = []
+        all_hidden_states: Optional[List[torch.Tensor]] = [] if return_trajectory else None
+        total_reg = torch.tensor(0.0, device=device)
+        total_ode_time = torch.tensor(0.0, device=device)
+
+        for b in range(batch_size):
+            seq_len = lengths[b].item()
+            if seq_len < 2:
+                all_predictions.append(torch.zeros(0, self.vocab_size, device=device))
+                if return_trajectory and all_hidden_states is not None:
+                    all_hidden_states.append(torch.zeros(0, self.hidden_dim, device=device))
+                continue
+
+            patient_codes = codes[b, :seq_len]
+
+            g_0 = self.embedding(patient_codes[0])
+            h_memory = torch.zeros(self.memory_dim, device=device)
+
+            if demographic_features is not None:
+                patient_demographics = demographic_features[b]
+                demographic_embedding = self.demographic_embedding(
+                    patient_demographics.unsqueeze(0)
+                ).squeeze(0)
+                h_embedding = g_0 + demographic_embedding
+            else:
+                h_embedding = g_0
+
+            h = torch.cat([h_memory, h_embedding], dim=0)
+
+            patient_predictions: List[torch.Tensor] = []
+            patient_states: Optional[List[torch.Tensor]] = [] if return_trajectory else None
+
+            for k in range(1, seq_len):
+                dt = self.uniform_dt / self.timescale
+
+                if dt >= 1e-6 and compute_regularization:
+                    h_aug = torch.cat([h, torch.zeros(1, device=device)])
+                    h_aug = h_aug.unsqueeze(0)
+
+                    t_span = torch.tensor([0.0, dt], device=device, dtype=torch.float32)
+
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+
+                            aug_trajectory = odeint(
+                                self.augmented_ode_func,
+                                h_aug,
+                                t_span,
+                                method=self.ode_method,
+                                rtol=self.rtol,
+                                atol=self.atol,
+                                options={"max_num_steps": 1000},
+                            )
+
+                            final_aug_state = aug_trajectory[-1, 0, :]
+                            h_new = final_aug_state[:-1]
+                            reg_increment = final_aug_state[-1]
+
+                            if torch.isnan(h_new).any() or torch.isinf(h_new).any():
+                                h_new = h
+                                reg_increment = torch.tensor(0.0, device=device)
+
+                            h = h_new
+                            total_reg = total_reg + reg_increment
+                            total_ode_time = total_ode_time + dt
+
+                    except Exception:
+                        pass
+
+                elif dt >= 1e-6:
+                    t_span = torch.tensor([0.0, dt], device=device, dtype=torch.float32)
+                    h0 = h.unsqueeze(0)
+
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+
+                            h_integrated = odeint(
+                                self.ode_func,
+                                h0,
+                                t_span,
+                                method=self.ode_method,
+                                rtol=self.rtol,
+                                atol=self.atol,
+                                options={"max_num_steps": 1000},
+                            )
+
+                            h_new = h_integrated[-1, 0, :]
+
+                            if not (torch.isnan(h_new).any() or torch.isinf(h_new).any()):
+                                h = h_new
+                    except Exception:
+                        pass
+
+                h_memory_part = h[: self.memory_dim]
+                h_embedding_part = h[self.memory_dim :]
+
+                pred_logits = self.decoder(h_embedding_part)
+                patient_predictions.append(pred_logits)
+
+                if return_trajectory and patient_states is not None:
+                    patient_states.append(h.detach().cpu())
+
+                g_k = self.embedding(patient_codes[k])
+                h_memory_part = self.memory_update(
+                    h_memory_part.unsqueeze(0),
+                    g_k.unsqueeze(0),
+                ).squeeze(0)
+                h = torch.cat([h_memory_part, h_embedding_part], dim=0)
+
+            if patient_predictions:
+                stacked_preds = torch.stack(patient_predictions, dim=0)
+                all_predictions.append(stacked_preds)
+            else:
+                all_predictions.append(torch.zeros(0, self.vocab_size, device=device))
+
+            if return_trajectory and all_hidden_states is not None:
+                if patient_states:
+                    all_hidden_states.append(torch.stack(patient_states, dim=0))
+                else:
+                    all_hidden_states.append(torch.zeros(0, self.hidden_dim, device=device))
+
+        max_pred_len = max((p.size(0) for p in all_predictions), default=0)
+        if max_pred_len == 0:
+            logits_out = torch.zeros(batch_size, 0, self.vocab_size, device=device)
+        else:
+            logits_out = torch.zeros(batch_size, max_pred_len, self.vocab_size, device=device)
+            for i, preds in enumerate(all_predictions):
+                if preds.size(0) > 0:
+                    logits_out[i, : preds.size(0), :] = preds
+
+        avg_reg = total_reg / max(total_ode_time, 1e-6) if compute_regularization else None
+
+        return logits_out, all_hidden_states, avg_reg
+
+
+class LogRegBaseline(nn.Module):
+
+    def __init__(self, vocab_size: int):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.linear = nn.Linear(vocab_size, vocab_size, bias=True)
+        nn.init.xavier_uniform_(self.linear.weight)
+        nn.init.zeros_(self.linear.bias)
+        print(f"LogReg baseline initialized: simple bag-of-codes")
+    
+    def forward(
+        self,
+        times: torch.Tensor,
+        codes: torch.Tensor,
+        lengths: torch.Tensor,
+        demographic_features: Optional[torch.Tensor] = None,
+        return_trajectory: bool = False,
+        compute_regularization: bool = False,
+    ) -> Tuple[torch.Tensor, Optional[List[torch.Tensor]], Optional[torch.Tensor]]:
+        batch_size = codes.size(0)
+        max_len = codes.size(1)
+        device = codes.device
+        
+        all_predictions: List[torch.Tensor] = []
+        
+        for b in range(batch_size):
+            seq_len = lengths[b].item()
+            if seq_len < 2:
+                all_predictions.append(torch.zeros(0, self.vocab_size, device=device))
+                continue
+            
+            patient_codes = codes[b, :seq_len]
+            patient_predictions: List[torch.Tensor] = []
+            
+            for k in range(1, seq_len):
+                cumulative_codes = patient_codes[:k].sum(dim=0)
+                cumulative_codes = torch.clamp(cumulative_codes, 0, 1)
+                logits = self.linear(cumulative_codes)
+                patient_predictions.append(logits)
+            
+            if patient_predictions:
+                stacked_preds = torch.stack(patient_predictions, dim=0)
+                all_predictions.append(stacked_preds)
+            else:
+                all_predictions.append(torch.zeros(0, self.vocab_size, device=device))
+        
+        max_pred_len = max((p.size(0) for p in all_predictions), default=0)
+        if max_pred_len == 0:
+            logits_out = torch.zeros(batch_size, 0, self.vocab_size, device=device)
+        else:
+            logits_out = torch.zeros(batch_size, max_pred_len, self.vocab_size, device=device)
+            for i, preds in enumerate(all_predictions):
+                if preds.size(0) > 0:
+                    logits_out[i, : preds.size(0), :] = preds
+        
+        return logits_out, None, None
+
+
 MODEL_REGISTRY: Dict[str, Type[nn.Module]] = {
+    "ICENode": ICENode,
     "ICENodeAugmented": ICENodeAugmented,
+    "ICENodeUniform": ICENodeUniform,
     "GRUBaseline": GRUBaseline,
     "RETAINBaseline": RETAINBaseline,
+    "LogRegBaseline": LogRegBaseline,
 }

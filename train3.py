@@ -615,8 +615,10 @@ def run_epoch(
 def main():
 
     parser = argparse.ArgumentParser(description='ICE-NODE Training')
-    parser.add_argument('--model', type=str, default='ICENodeAugmented', choices=['ICENode', 'ICENodeAugmented', 'GRUBaseline'],
-                        help='Model type: ICENode or ICENodeAugmented')
+    parser.add_argument('--model', type=str, default='ICENodeAugmented', 
+                        choices=['ICENode', 'ICENodeAugmented', 'ICENodeUniform', 
+                                'GRUBaseline', 'RETAINBaseline', 'LogRegBaseline'],
+                        help='Model: ICENode, ICENodeAugmented, ICENodeUniform, GRU, RETAIN, or LogReg')
     parser.add_argument('--dataset', type=str, default='mimic3', choices=['mimic3', 'mimic4'],
                         help='Dataset to use: mimic3 or mimic4')
     parser.add_argument('--epochs', type=int, default=60,
@@ -655,7 +657,13 @@ def main():
     args = parser.parse_args()
 
     set_seed(args.seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
 
     print(f"======================================================================\nICE-NODE Training - {'Augmented' if args.model == 'ICENodeAugmented' else 'Standard'} ODE Implementation\n======================================================================")
     print(f"Device: {device}")
