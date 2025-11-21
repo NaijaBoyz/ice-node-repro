@@ -85,6 +85,24 @@ class ModelEvaluator:
             vocab_size=self.vocab_size,
         )
         print("   Data loaded successfully")
+        print("\nTest Set Code Coverage:")
+        test_code_counts = torch.zeros(self.vocab_size)
+        for i in range(len(test_dataset)):
+            _, codes, length, _ = test_dataset[i]
+            length_val = int(length.item()) if torch.is_tensor(length) else int(length)
+            for t in range(length_val):
+                test_code_counts += codes[t]
+        print(f"Codes appearing in test set: {(test_code_counts > 0).sum().item()}/{self.vocab_size}")
+        for q in range(5):
+            mask = self.quantile_masks.get(f"Q{q}")
+            if mask is None:
+                continue
+            q_codes = torch.where(mask)[0]
+            if len(q_codes) == 0:
+                print(f" Q{q}: 0/0 codes appear in test set")
+                continue
+            q_test_coverage = sum(test_code_counts[c].item() > 0 for c in q_codes)
+            print(f" Q{q}: {q_test_coverage}/{len(q_codes)} codes appear in test set")
         return self.test_loader
 
     def evaluate_model(self) -> Dict[str, Any]:
