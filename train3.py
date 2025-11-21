@@ -78,7 +78,7 @@ def compute_code_frequency_quantiles(train_dataset, vocab_size=581, min_occurren
             while current_q < 4 and frac > boundaries[current_q]:
                 current_q += 1
 
-            quantile_masks[f"Q{current_q}"][code] = True
+            quantile_masks[f"Q{4-current_q}"][code] = True
 
         for q in range(5):
             mask = quantile_masks[f"Q{q}"]
