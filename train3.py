@@ -816,8 +816,8 @@ def main():
         val_losses.append(val_loss)
 
         # ---- Selection / scheduler metric ----
-        if args.paper_mode and "visit_micro_auprc" in val_metrics:
-            selection_metric = val_metrics["visit_micro_auprc"]
+        if args.paper_mode and "visit_micro_auroc" in val_metrics:
+            selection_metric = val_metrics["visit_micro_auroc"]
         elif "visit_micro_auroc" in val_metrics:
             selection_metric = val_metrics["visit_micro_auroc"]
         else:
