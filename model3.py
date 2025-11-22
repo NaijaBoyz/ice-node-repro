@@ -276,9 +276,9 @@ class ICENodeAugmented(nn.Module):
             for k in range(1, seq_len):
                 t_prev = patient_times[k - 1]
                 t_curr = patient_times[k]
-                dt_days = float((t_curr - t_prev).item())
-                dt_days = min(dt_days, self.max_dt)
-                dt = dt_days / self.timescale
+                # Compute dt on GPU, minimize CPU-GPU sync by converting once
+                dt_tensor = torch.clamp((t_curr - t_prev) / self.timescale, max=self.max_dt / self.timescale)
+                dt = dt_tensor.item()  # Single sync point instead of multiple
 
                 if dt >= 1e-6 and compute_regularization:
                     h_aug = torch.cat([h, torch.zeros(1, device=device)])
