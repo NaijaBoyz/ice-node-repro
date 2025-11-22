@@ -81,10 +81,15 @@ class AugmentedODEFunc(nn.Module):
 
     def _compute_second_derivative(self, h, dh_dt):
         dh_dt = torch.clamp(dh_dt, min=-10.0, max=10.0)
+        device = h.device
 
         try:
+            # Ensure inputs are on the same device and require gradients
+            h = h.to(device).requires_grad_(True)
+            dh_dt = dh_dt.to(device)
+
             jvp = torch.autograd.functional.jvp(
-                lambda x: self.base_func(0, x),
+                lambda x: self.base_func(torch.tensor(0.0, device=device), x),
                 h,
                 dh_dt,
                 create_graph=True,
@@ -228,6 +233,12 @@ class ICENodeAugmented(nn.Module):
         batch_size = codes.size(0)
         max_len = codes.size(1)
         device = codes.device
+
+        # Ensure all inputs are on the same device to prevent CUDA errors
+        times = times.to(device)
+        lengths = lengths.to(device)
+        if demographic_features is not None:
+            demographic_features = demographic_features.to(device)
 
         all_predictions: List[torch.Tensor] = []
         all_hidden_states: Optional[List[torch.Tensor]] = [] if return_trajectory else None
@@ -566,7 +577,7 @@ class ICENodeUniform(ICENodeAugmented):
         )
         self.uniform_dt = uniform_dt
         print(f"ICE-NODE UNIFORM initialized: fixed dt={uniform_dt} days")
-    
+
     def forward(
         self,
         times: torch.Tensor,
@@ -579,6 +590,12 @@ class ICENodeUniform(ICENodeAugmented):
         batch_size = codes.size(0)
         max_len = codes.size(1)
         device = codes.device
+
+        # Ensure all inputs are on the same device to prevent CUDA errors
+        times = times.to(device)
+        lengths = lengths.to(device)
+        if demographic_features is not None:
+            demographic_features = demographic_features.to(device)
 
         all_predictions: List[torch.Tensor] = []
         all_hidden_states: Optional[List[torch.Tensor]] = [] if return_trajectory else None
@@ -682,7 +699,7 @@ class ICENodeUniform(ICENodeAugmented):
                 patient_predictions.append(pred_logits)
 
                 if return_trajectory and patient_states is not None:
-                    patient_states.append(h.detach().cpu())
+                    patient_states.append(h.clone())
 
                 g_k = self.embedding(patient_codes[k])
                 h_memory_part = self.memory_update(
@@ -726,7 +743,7 @@ class LogRegBaseline(nn.Module):
         nn.init.xavier_uniform_(self.linear.weight)
         nn.init.zeros_(self.linear.bias)
         print(f"LogReg baseline initialized: simple bag-of-codes")
-    
+
     def forward(
         self,
         times: torch.Tensor,
@@ -739,6 +756,10 @@ class LogRegBaseline(nn.Module):
         batch_size = codes.size(0)
         max_len = codes.size(1)
         device = codes.device
+
+        # Ensure all inputs are on the same device to prevent CUDA errors
+        times = times.to(device)
+        lengths = lengths.to(device)
         
         all_predictions: List[torch.Tensor] = []
         
