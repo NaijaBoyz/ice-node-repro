@@ -303,6 +303,14 @@ def compute_metrics_flat(
         "macro_auprc": float(macro_auprc),
     }
 
+    # Alias visit-level metrics to the per-visit micro/macro metrics
+    metrics.update({
+        "visit_micro_auroc": metrics["micro_auroc"],
+        "visit_micro_auprc": metrics["micro_auprc"],
+        "visit_macro_auroc": metrics["macro_auroc"],
+        "visit_macro_auprc": metrics["macro_auprc"],
+    })
+
     for k in k_list:
 
         if hasattr(k, 'item'):
@@ -319,77 +327,20 @@ def compute_metrics_flat(
         metrics[f"hits@{k}"] = float(np.mean(hits)) if hits else 0.0
 
     if quantile_masks is not None:
-        print(f"\nCalculating per-code accuracy...")
-        print(f"  Original tensor shapes: logits={logits_valid.shape}, targets={targets_valid.shape}")
+        print(f"\nCalculating per-code accuracy (per visit)...")
+        print(f"  Tensor shapes: logits={logits_valid.shape}, targets={targets_valid.shape}")
 
-        if lengths_valid is not None and len(lengths_valid) > 0:
-            print(f"  Reshaping using {len(lengths_valid)} admission lengths")
-            probs_adm_list, y_true_adm_list = [], []
-            row_idx = 0
+        # Use per-visit probabilities and labels directly (no admission-level pooling)
+        probs_visit, y_true_visit = probs, y_true
 
-            for length in lengths_valid:
-                adm_length = int(length.item()) if torch.is_tensor(length) else int(length)
-                if adm_length > 0 and row_idx + adm_length <= N:
-                    adm_probs = probs[row_idx:row_idx + adm_length]
-                    adm_y_true = y_true[row_idx:row_idx + adm_length]
+        N_visit = probs_visit.shape[0]
 
-                    y_true_adm_list.append((adm_y_true > 0.5).any(axis=0).astype(float))
-                    probs_adm_list.append(adm_probs.max(axis=0))
-                    row_idx += adm_length
-
-            if probs_adm_list:
-                probs_adm = np.stack(probs_adm_list, axis=0)
-                y_true_adm = np.stack(y_true_adm_list, axis=0)
-                print(f"  Reshaped to {probs_adm.shape} admissions")
-            else:
-                probs_adm, y_true_adm = probs, y_true
-                print("  Warning: Could not reshape by admission")
-        else:
-            probs_adm, y_true_adm = probs, y_true
-            print("  No lengths provided, using original tensors")
-
-        N_adm = probs_adm.shape[0]
-
-        y_true_adm_flat = y_true_adm.ravel()
-        y_score_adm_flat = probs_adm.ravel()
-
-        if np.any(y_true_adm_flat > 0):
-            visit_micro_auroc = roc_auc_score(y_true_adm_flat, y_score_adm_flat)
-            visit_micro_auprc = average_precision_score(y_true_adm_flat, y_score_adm_flat)
-        else:
-            visit_micro_auroc = 0.0
-            visit_micro_auprc = 0.0
-
-        visit_aurocs = []
-        visit_auprcs = []
-        for j in range(V):
-            yj = y_true_adm[:, j]
-            sj = probs_adm[:, j]
-            if np.any(yj > 0):
-                try:
-                    visit_aurocs.append(roc_auc_score(yj, sj))
-                    visit_auprcs.append(average_precision_score(yj, sj))
-                except ValueError:
-                    continue
-
-        if visit_aurocs:
-            visit_macro_auroc = float(np.mean(visit_aurocs))
-            visit_macro_auprc = float(np.mean(visit_auprcs))
-        else:
-            visit_macro_auroc = 0.0
-            visit_macro_auprc = 0.0
-
-        metrics["visit_micro_auroc"] = float(visit_micro_auroc)
-        metrics["visit_micro_auprc"] = float(visit_micro_auprc)
-        metrics["visit_macro_auroc"] = float(visit_macro_auroc)
-        metrics["visit_macro_auprc"] = float(visit_macro_auprc)
-
-        top15_idx = np.argpartition(-probs_adm, kth=min(15, V-1), axis=1)[:, :15]
-        print(f"  Computing top-15 predictions for {N_adm} admissions")
+        top15_idx = np.argpartition(-probs_visit, kth=min(15, V-1), axis=1)[:, :15]
+        print(f"  Computing top-15 predictions for {N_visit} visits")
 
         k_detect = 20
-        topk_idx_det = np.argpartition(-probs_adm, kth=min(k_detect, V-1), axis=1)[:, :k_detect]
-        ground_truth_bool = y_true_adm.astype(bool)
+        topk_idx_det = np.argpartition(-probs_visit, kth=min(k_detect, V-1), axis=1)[:, :k_detect]
+        ground_truth_bool = y_true_visit.astype(bool)
 
         for q in range(5):
             q_key = f'Q{q}'
@@ -417,7 +368,7 @@ def compute_metrics_flat(
 
             for code in quantile_codes:
 
-                code_occurrences = np.where(y_true_adm[:, code] > 0.5)[0]
+                code_occurrences = np.where(y_true_visit[:, code] > 0.5)[0]
                 if len(code_occurrences) == 0:
                     continue
 
@@ -439,7 +390,7 @@ def compute_metrics_flat(
             group_ground_truth = ground_truth_bool[:, quantile_codes]
 
             topk_group = np.zeros_like(group_ground_truth, dtype=bool)
-            for i in range(N_adm):
+            for i in range(N_visit):
                 top_codes = topk_idx_det[i]
 
                 in_group = np.intersect1d(top_codes, quantile_codes)
@@ -779,6 +730,7 @@ def main():
     best_val_auroc = -1.0
     train_losses = []
     val_losses = []
+    selection_metrics = []
 
     for epoch in range(1, args.epochs + 1):
         print(f"\nEpoch {epoch}/{args.epochs}")
@@ -816,12 +768,15 @@ def main():
         val_losses.append(val_loss)
 
         # ---- Selection / scheduler metric ----
-        if args.paper_mode and "visit_micro_auroc" in val_metrics:
+        if args.paper_mode:
+            # In paper-mode, selection must use the averaged visit AUROC
             selection_metric = val_metrics["visit_micro_auroc"]
         elif "visit_micro_auroc" in val_metrics:
             selection_metric = val_metrics["visit_micro_auroc"]
         else:
             selection_metric = val_metrics["micro_auroc"]
+
+        selection_metrics.append(selection_metric)
 
         for scheduler in schedulers:
             scheduler.step(selection_metric)
@@ -850,6 +805,17 @@ def main():
         plt.legend()
         plot_path = Path(args.save_dir) / f"{args.dataset}_{args.model}_loss.png"
         plt.savefig(plot_path)
+        plt.close()
+
+    if args.paper_mode and selection_metrics:
+        plt.figure()
+        epochs_range = range(1, len(selection_metrics) + 1)
+        plt.plot(epochs_range, selection_metrics, marker="o")
+        plt.xlabel("Epoch")
+        plt.ylabel("visit_micro_auroc (selection metric)")
+        plt.title("Validation visit_micro_auroc per epoch")
+        sel_plot_path = Path(args.save_dir) / f"{args.dataset}_{args.model}_selection_metric.png"
+        plt.savefig(sel_plot_path)
         plt.close()
 
 if __name__ == "__main__":
