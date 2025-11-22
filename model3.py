@@ -81,15 +81,10 @@ class AugmentedODEFunc(nn.Module):
 
     def _compute_second_derivative(self, h, dh_dt):
         dh_dt = torch.clamp(dh_dt, min=-10.0, max=10.0)
-        device = h.device
 
         try:
-            # Ensure inputs are on the same device and require gradients
-            h = h.to(device).requires_grad_(True)
-            dh_dt = dh_dt.to(device)
-
             jvp = torch.autograd.functional.jvp(
-                lambda x: self.base_func(torch.tensor(0.0, device=device), x),
+                lambda x: self.base_func(0, x),
                 h,
                 dh_dt,
                 create_graph=True,
