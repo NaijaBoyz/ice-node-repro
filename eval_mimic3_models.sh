@@ -35,7 +35,7 @@ for model_info in "${models[@]}"; do
         python eval.py \
             --model-path "$ckpt_path" \
             --dataset mimic3 \
-            --batch-size 64 \
+            --batch-size 256 \
             --seed 42 \
             --output-dir "eval_results/mimic3_models/mimic3_test/$dir_name"
         echo "✓ $display_name evaluated on MIMIC-III"

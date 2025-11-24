@@ -67,11 +67,13 @@ class ModelEvaluator:
             config = {"vocab_size": self.vocab_size}
         else:
             raise ValueError(f"Unknown model type in checkpoint: {model_name}")
+
         print(f"   Config: {config}")
         self.model = model_class(**config)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.to(self.device)
         self.model.eval()
+
         print("   Model loaded successfully")
         print(f"   Parameters: {sum(p.numel() for p in self.model.parameters()):,}")
         return self.model
@@ -95,6 +97,7 @@ class ModelEvaluator:
             vocab_size=self.vocab_size,
         )
         print("   Data loaded successfully")
+
         print("\nTest Set Code Coverage:")
         test_code_counts = torch.zeros(self.vocab_size)
         for i in range(len(test_dataset)):
@@ -102,7 +105,8 @@ class ModelEvaluator:
             length_val = int(length.item()) if torch.is_tensor(length) else int(length)
             for t in range(length_val):
                 test_code_counts += codes[t]
-        print(f"Codes appearing in test set: {(test_code_counts > 0).sum().item()}/{self.vocab_size}")
+        num_codes_in_test = (test_code_counts > 0).sum().item()
+        print(f"Codes appearing in test set: {num_codes_in_test}/{self.vocab_size}")
         for q in range(5):
             mask = self.quantile_masks.get(f"Q{q}")
             if mask is None:
@@ -135,6 +139,7 @@ class ModelEvaluator:
                     demographic_features = None
                 else:
                     times, codes, demographic_features, lengths, patient_ids = batch
+
                 times = times.to(self.device)
                 codes = codes.to(self.device)
                 lengths = lengths.to(self.device)
@@ -153,8 +158,14 @@ class ModelEvaluator:
                 all_lengths.append(lengths.cpu())
                 all_patient_ids.extend(patient_ids)
         print("   Model inference complete")
-        all_logits_cat = torch.cat([l.reshape(-1, l.shape[-1]) for l in all_logits], dim=0)
-        all_targets_cat = torch.cat([t.reshape(-1, t.shape[-1]) for t in all_targets], dim=0)
+        all_logits_cat = torch.cat(
+            [l.reshape(-1, l.shape[-1]) for l in all_logits],
+            dim=0,
+        )
+        all_targets_cat = torch.cat(
+            [t.reshape(-1, t.shape[-1]) for t in all_targets],
+            dim=0,
+        )
         all_lengths_cat = torch.cat(all_lengths, dim=0)
         print(f"   Computing metrics on {all_logits_cat.shape[0]} timesteps...")
         metrics = compute_metrics_flat(
@@ -182,15 +193,23 @@ class ModelEvaluator:
         df = pd.DataFrame(detectability_data)
         return df
 
+    def format_top15_table(self, metrics: Dict[str, Any]) -> pd.DataFrame:
+
+        row = {"metric": "hits@15"}
+        for q in range(5):
+            row[f"Q{q}"] = metrics.get(f"hits@15_q{q}", 0.0)
+        return pd.DataFrame([row])
+
+
     def print_detailed_results(self, metrics: Dict[str, Any]):
         print("\n" + "=" * 80)
         print("MODEL EVALUATION RESULTS")
         print("=" * 80)
         print("\nOVERALL PERFORMANCE:")
-        print(f"   MICRO-AUC:     {metrics['micro_auroc']:.6f}")
-        print(f"   MICRO-AUPRC:   {metrics['micro_auprc']:.6f}")
-        print(f"   MACRO-AUC:     {metrics['macro_auroc']:.6f}")
-        print(f"   MACRO-AUPRC:   {metrics['macro_auprc']:.6f}")
+        print(f"   MICRO-AUC:       {metrics['micro_auroc']:.6f}")
+        print(f"   MICRO-AUPRC:     {metrics['micro_auprc']:.6f}")
+        print(f"   MACRO-AUC:       {metrics['macro_auroc']:.6f}")
+        print(f"   MACRO-AUPRC:     {metrics['macro_auprc']:.6f}")
         if "visit_micro_auroc" in metrics:
             print(f"   VISIT MICRO-AUC: {metrics['visit_micro_auroc']:.6f}")
         if "visit_macro_auroc" in metrics:
@@ -199,31 +218,49 @@ class ModelEvaluator:
         for k in [1, 2, 3, 5, 7, 10, 15, 20]:
             key = f"hits@{k}"
             if key in metrics:
-                print(f"   Hits@{k:2d}:       {metrics[key]:.6f}")
-        print("\nDETECTABILITY BY CODE FREQUENCY:")
+                print(f"   Hits@{k:2d}:         {metrics[key]:.6f}")
+        print("\nDETECTABILITY BY CODE FREQUENCY (ACC-Pi-k):")
         print("   Format: ACC-P{percentile}-k{topk}")
         print("   P0 = Rarest 20%, P1 = 20-40%, P2 = 40-60%, P3 = 60-80%, P4 = Most Common 20%\n")
-        df = self.format_results_table(metrics)
+        df_det = self.format_results_table(metrics)
         print(f"   {'k':>3s} │ {'P0 (Rare)':>10s} │ {'P1':>8s} │ {'P2':>8s} │ {'P3':>8s} │ {'P4 (Common)':>12s}")
         print(f"   {'─'*3}─┼─{'─'*10}─┼─{'─'*8}─┼─{'─'*8}─┼─{'─'*8}─┼─{'─'*12}")
-        for _, row in df.iterrows():
+        for _, row in df_det.iterrows():
             k = int(row['k'])
-            print(f"   {k:3d} │ {row['P0']:10.4f} │ {row['P1']:8.4f} │ {row['P2']:8.4f} │ {row['P3']:8.4f} │ {row['P4']:12.4f}")
+            print(
+                f"   {k:3d} │ "
+                f"{row['P0']:10.4f} │ "
+                f"{row['P1']:8.4f} │ "
+                f"{row['P2']:8.4f} │ "
+                f"{row['P3']:8.4f} │ "
+                f"{row['P4']:12.4f}"
+            )
+
+        print("\nTOP-15 PER-CODE ACCURACY BY FREQUENCY (Table 2 style):")
+        print("   Metric: average per-code P@15 over codes in each frequency quantile.\n")
+        print(f"   {'Quantile':>10s} │ {'hits@15':>10s}")
+        print(f"   {'─'*10}─┼─{'─'*10}")
+        for q in range(5):
+            key = f"hits@15_q{q}"
+            val = metrics.get(key, 0.0)
+            print(f"   Q{q:1d}{' ':7s} │ {val:10.4f}")
+
         print("\nEVALUATION SUMMARY:")
         print(f"   Total patients:    {metrics['total_patients']:,}")
         print(f"   Total timesteps:   {metrics['total_timesteps']:,}")
-        print(f"   Vocabulary size:   {metrics['vocab_size']}")
-        paper_micro_auc = 0.9258 #change this to the youre models micro auc
-        paper_acc_p0_k20 = 0.265 #change this to the youre models acc p0 k20
+        print(f"   Vocabulary size:   {metrics['vocab_size']}")   
+        paper_micro_auc = 0.9258  # Paper's GRU / ICE-NODE micro AUC (update if needed)
+        paper_acc_p0_k20 = 0.265  # Paper's ACC-P0-k20 for ICE-NODE (update if needed)
+
         print("\nCOMPARISON TO PAPER VALUES:")
         print(f"   Paper MICRO-AUC:      {paper_micro_auc:.4f}")
-        print(f"   Your MICRO-AUC:       {metrics['micro_auroc']:.4f}")
+        print(f"   Your  MICRO-AUC:      {metrics['micro_auroc']:.4f}")
         print(f"   Difference:           {metrics['micro_auroc'] - paper_micro_auc:+.4f}")
         print()
         print(f"   Paper ACC-P0-k20:     {paper_acc_p0_k20:.4f}")
         if "ACC-P0-k20" in metrics:
             your_acc = metrics["ACC-P0-k20"]
-            print(f"   Your ACC-P0-k20:      {your_acc:.4f}")
+            print(f"   Your  ACC-P0-k20:     {your_acc:.4f}")
             print(f"   Difference:           {your_acc - paper_acc_p0_k20:+.4f}")
         print("\n" + "=" * 80)
 
@@ -234,10 +271,14 @@ class ModelEvaluator:
         with open(metrics_file, "wb") as f:
             pickle.dump(metrics, f)
         print(f"Metrics saved to {metrics_file}")
-        df = self.format_results_table(metrics)
-        table_file = output_dir / "detectability_table.csv"
-        df.to_csv(table_file, index=False)
-        print(f"Detectability table saved to {table_file}")
+        df_det = self.format_results_table(metrics)
+        det_file = output_dir / "detectability_table.csv"
+        df_det.to_csv(det_file, index=False)
+        print(f"Detectability table saved to {det_file}")
+        df_top15 = self.format_top15_table(metrics)
+        top15_file = output_dir / "top15_by_quantile_table.csv"
+        df_top15.to_csv(top15_file, index=False)
+        print(f"Top-15 per-code accuracy table saved to {top15_file}")
         report_file = output_dir / "evaluation_report.txt"
         with open(report_file, "w") as f:
             f.write("Model Evaluation Report\n")
@@ -252,13 +293,21 @@ class ModelEvaluator:
                 f.write(f"VISIT MACRO-AUC: {metrics['visit_macro_auroc']:.6f}\n")
             f.write(f"Total Patients: {metrics['total_patients']}\n")
             f.write(f"Total Timesteps: {metrics['total_timesteps']}\n\n")
-            f.write("Detectability Results:\n")
+
+            f.write("Detectability Results (ACC-Pi-k):\n")
             for k in [1, 2, 3, 5, 7, 10, 15, 20]:
                 f.write(f"\nTop-{k} Results:\n")
                 for q in range(5):
                     key = f"ACC-P{q}-k{k}"
                     if key in metrics:
                         f.write(f"  P{q}: {metrics[key]:.4f}\n")
+
+            f.write("\nTop-15 Per-code Accuracy by Frequency (Table 2 style):\n")
+            for q in range(5):
+                key = f"hits@15_q{q}"
+                if key in metrics:
+                    f.write(f"  Q{q}: {metrics[key]:.4f}\n")
+
         print(f"Full report saved to {report_file}")
 
     def run_full_evaluation(self, batch_size: int = 64, output_dir: str = "eval_results") -> Dict[str, Any]:
@@ -273,12 +322,43 @@ class ModelEvaluator:
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Model")
-    parser.add_argument("--model-path", type=str, required=True, help="Path to trained model checkpoint")
-    parser.add_argument("--dataset", type=str, default="mimic3", choices=["mimic3", "mimic4"], help="Dataset to evaluate on")
-    parser.add_argument("--batch-size", type=int, default=64, help="Batch size for evaluation")
-    parser.add_argument("--output-dir", type=str, default="eval_results", help="Directory to save evaluation results")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--device", type=str, default="auto", help="Device: auto, cpu, or cuda")
+    parser.add_argument(
+        "--model-path",
+        type=str,
+        required=True,
+        help="Path to trained model checkpoint",
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="mimic3",
+        choices=["mimic3", "mimic4"],
+        help="Dataset to evaluate on",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Batch size for evaluation",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="eval_results",
+        help="Directory to save evaluation results",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help="Device: auto, cpu, or cuda",
+    )
     args = parser.parse_args()
     set_seed(args.seed)
     evaluator = ModelEvaluator(
