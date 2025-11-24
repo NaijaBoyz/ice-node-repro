@@ -490,6 +490,7 @@ def run_epoch(
     optimizers=None,
     use_regularization=True,
     reg_alpha=1000.0,
+    l1_lambda=0.0,  
     quantile_masks=None,
     class_weights=None,
     use_class_weights=False,
@@ -557,12 +558,20 @@ def run_epoch(
             else:
                 bce_loss = compute_loss_bce(logits, targets, device=device, use_focal=False)
 
+        loss = bce_loss
+        reg_loss = torch.tensor(0.0, device=device)
+
         if use_regularization and reg_loss_batch is not None:
-            reg_loss = reg_alpha * reg_loss_batch
-            loss = bce_loss + reg_loss
-        else:
-            loss = bce_loss
-            reg_loss = torch.tensor(0.0, device=device)
+            
+            if 'LogReg' in model.__class__.__name__ and l1_lambda > 0:
+                l1_penalty = l1_lambda * reg_loss_batch
+                loss = loss + l1_penalty
+                reg_loss = l1_penalty
+            
+            elif 'ICENode' in model.__class__.__name__:
+                ode_reg = reg_alpha * reg_loss_batch
+                loss = loss + ode_reg
+                reg_loss = ode_reg
 
         if train and optimizers_list:
             if not torch.isnan(loss) and not torch.isinf(loss):
@@ -629,6 +638,8 @@ def main():
                         help='Disable ODE regularization')
     parser.add_argument('--reg-alpha', type=float, default=1000.0,
                         help='Regularization strength parameter alpha_K')
+    parser.add_argument('--l1-lambda', type=float, default=0.0,
+                        help='L1 regularization strength for LogReg elastic net.')
     parser.add_argument('--reg-order', type=int, default=3,
                         help='Order of regularization (K)')
     parser.add_argument('--seed', type=int, default=42,
@@ -741,6 +752,7 @@ def main():
             optimizers=optimizers,
             use_regularization=not args.no_regularization,
             reg_alpha=args.reg_alpha,
+            l1_lambda=args.l1_lambda,
             quantile_masks=quantile_masks,
             class_weights=class_weights if args.use_class_weights else None,
             use_class_weights=args.use_class_weights,

@@ -113,7 +113,7 @@ echo "==========================================================================
 uv run train3.py \
     --model LogRegBaseline \
     --dataset mimic3 \
-    --epochs 30 \
+    --epochs 60 \
     --batch-size 256 \
     --lr-other 1e-3 \
     --weight-decay 1e-5 \
@@ -121,8 +121,8 @@ uv run train3.py \
     --patience 10 \
     --seed 42 \
     --paper-mode \
-    --no-regularization \
     --no-focal-loss \
+    --l1-lambda 1e-4 \
     --save-dir checkpoints/logreg
 
 echo "LogReg Baseline trained!"

@@ -771,8 +771,13 @@ class LogRegBaseline(nn.Module):
             for i, preds in enumerate(all_predictions):
                 if preds.size(0) > 0:
                     logits_out[i, : preds.size(0), :] = preds
-        
-        return logits_out, None, None
+
+        l1_penalty = torch.tensor(0.0, device=device)
+        if compute_regularization:
+            num_params = self.linear.weight.numel()
+            l1_penalty = self.linear.weight.abs().sum() / num_params
+
+        return logits_out, None, l1_penalty
 
 
 MODEL_REGISTRY: Dict[str, Type[nn.Module]] = {
