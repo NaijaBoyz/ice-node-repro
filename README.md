@@ -131,6 +131,121 @@ chmod +x train_mimic3.sh train_mimic4.sh eval_mm3Models_mimc3_and_4.sh run_all_m
 ```
 
 
+### 6. Ablation Studies
+
+The `ablations/` directory contains ablation studies to test specific model components.
+
+#### Demographic Features Ablation
+
+Tests the impact of adding demographic features (gender, age, trajectory duration) to ICENodeAugmented.
+
+**Quick Start (Full Pipeline):**
+
+```bash
+# Step 1: Extract demographics from MIMIC-III/IV data
+python ablations/with_demographics/etl_with_demographics.py
+
+# Step 2: Build training examples with demographics
+python ablations/with_demographics/build_examples_with_demographics.py
+
+# Step 3: Train ICENodeAugmented with demographics
+bash ablations/with_demographics/train_with_demographics.sh
+
+# Step 4: Evaluate on test set
+python ablations/with_demographics/eval_demographics.py \
+  --model-path ablations/with_demographics/checkpoints/icenode_demographics/mimic3_ICENodeAugmented_best.pt \
+  --dataset mimic3 \
+  --split test \
+  --batch-size 256 \
+  --output-dir ablations/with_demographics/eval_results
+```
+
+**Manual Training (with custom parameters):**
+
+```bash
+python ablations/with_demographics/train_demographics.py \
+  --model ICENodeAugmented \
+  --dataset mimic3 \
+  --epochs 60 \
+  --batch-size 256 \
+  --lr-dynamics 7.15e-5 \
+  --lr-other 1.14e-3 \
+  --weight-decay 1e-5 \
+  --reg-alpha 1000.0 \
+  --reg-order 3 \
+  --seed 42 \
+  --paper-mode \
+  --no-focal-loss \
+  --save-dir ablations/with_demographics/checkpoints/icenode_demographics
+```
+
+**Evaluation Options:**
+
+```bash
+# Evaluate on test set with results saved
+python ablations/with_demographics/eval_demographics.py \
+  --model-path ablations/with_demographics/checkpoints/icenode_demographics/mimic3_ICENodeAugmented_best.pt \
+  --dataset mimic3 \
+  --split test \
+  --batch-size 256 \
+  --output-dir ablations/with_demographics/eval_results
+
+# Evaluate on validation set (no output directory)
+python ablations/with_demographics/eval_demographics.py \
+  --model-path ablations/with_demographics/checkpoints/icenode_demographics/mimic3_ICENodeAugmented_best.pt \
+  --dataset mimic3 \
+  --split val \
+  --batch-size 256
+```
+
+**Demographic Features:**
+- **Gender**: 0.0 (female), 1.0 (male), 0.5 (unknown)
+- **Normalized Age**: age at first admission / 100
+- **Relative Duration**: total trajectory duration / 365 days
+
+The demographic features are processed through a 2-layer MLP and added to the initial clinical code embedding.
+
+**Comparison with Baseline:**
+
+To compare performance with and without demographics:
+
+```bash
+# Baseline (no demographics) - use main training script
+python train3.py \
+  --model ICENode \
+  --dataset mimic3 \
+  --epochs 60 \
+  --batch-size 256 \
+  --lr-dynamics 7.15e-5 \
+  --lr-other 1.14e-3 \
+  --save-dir checkpoints/icenode_baseline
+
+# With demographics - use ablation script
+python ablations/with_demographics/train_demographics.py \
+  --model ICENodeAugmented \
+  --dataset mimic3 \
+  --epochs 60 \
+  --batch-size 256 \
+  --lr-dynamics 7.15e-5 \
+  --lr-other 1.14e-3 \
+  --save-dir ablations/with_demographics/checkpoints/icenode_demographics
+
+# Compare results
+python eval.py --model-path checkpoints/icenode_baseline/mimic3_ICENode_best.pt --dataset mimic3
+python ablations/with_demographics/eval_demographics.py \
+  --model-path ablations/with_demographics/checkpoints/icenode_demographics/mimic3_ICENodeAugmented_best.pt \
+  --dataset mimic3 \
+  --split test
+```
+
+**Output Files:**
+
+After running the full pipeline, you'll have:
+- `ablations/with_demographics/data/processed/` - Processed data with demographics
+- `ablations/with_demographics/checkpoints/` - Model checkpoints
+- `ablations/with_demographics/eval_results/` - Evaluation metrics (JSON, CSV)
+
+
 Citation
 --------
 
