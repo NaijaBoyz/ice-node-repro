@@ -4,3 +4,5 @@
 /__pycache__
 /data
 /eval_results
+/ablations/with_demographics/data
+/ablations/with_demographics/eval_results
